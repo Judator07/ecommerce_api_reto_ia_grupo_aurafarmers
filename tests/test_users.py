@@ -34,6 +34,23 @@ def test_crear_usuario_con_email_duplicado_devuelve_409(client, user):
     assert response.json() == {"detail": "Ya existe un usuario con ese email"}
 
 
+def test_email_se_guarda_en_minusculas_y_el_duplicado_no_depende_de_ellas(
+    client,
+):
+    response = client.post(
+        "/users/",
+        json={"name": "Ana", "email": "ANA@Example.com"},
+    )
+    duplicate = client.post(
+        "/users/",
+        json={"name": "Ana", "email": "ana@example.com"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["email"] == "ana@example.com"
+    assert duplicate.status_code == 409
+
+
 @pytest.mark.parametrize(
     "email",
     ["no-es-un-email", "ana@", "a" * 50 + "@" + "b" * 46 + ".com"],
@@ -47,8 +64,8 @@ def test_crear_usuario_con_email_invalido_devuelve_422(client, email):
 
 @pytest.mark.parametrize(
     "name",
-    ["", "a" * 51],
-    ids=["vacio", "mas_de_50_caracteres"],
+    ["", "   ", "a" * 51],
+    ids=["vacio", "solo_espacios", "mas_de_50_caracteres"],
 )
 def test_crear_usuario_con_nombre_invalido_devuelve_422(client, name):
     response = client.post(

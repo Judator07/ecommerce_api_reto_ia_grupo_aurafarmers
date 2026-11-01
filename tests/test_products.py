@@ -33,13 +33,56 @@ def test_crear_producto_con_precio_invalido_devuelve_422(client, price):
     assert response.status_code == 422
 
 
-def test_crear_producto_con_stock_negativo_devuelve_422(client):
+@pytest.mark.parametrize(
+    "stock",
+    [-1, 2**31],
+    ids=["negativo", "mayor_a_int"],
+)
+def test_crear_producto_con_stock_fuera_de_rango_devuelve_422(client, stock):
     response = client.post(
         "/products/",
-        json={"name": "Teclado", "price": 50, "stock": -1},
+        json={"name": "Teclado", "price": 50, "stock": stock},
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '{"name": "Teclado", "price": NaN, "stock": 5}',
+        '{"name": "Teclado", "price": 50, "stock": Infinity}',
+    ],
+    ids=["price_nan", "stock_infinity"],
+)
+def test_crear_producto_con_nan_o_infinity_devuelve_422(client, body):
+    # Antes: el manejador por defecto repetía el NaN en la respuesta, no lo
+    # podía serializar y la API respondía 500.
+    response = client.post(
+        "/products/",
+        content=body,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_crear_producto_con_nombre_de_solo_espacios_devuelve_422(client):
+    response = client.post(
+        "/products/",
+        json={"name": "   ", "price": 50, "stock": 5},
+    )
+
+    assert response.status_code == 422
+
+
+def test_listar_productos_ordena_por_id_en_la_consulta(client, count_queries):
+    # SQLite devuelve el orden de inserción aunque falte ORDER BY; por eso se
+    # revisa la consulta enviada a la base de datos.
+    with count_queries() as statements:
+        client.get("/products/")
+
+    assert any("ORDER BY products.id" in sql for sql in statements)
 
 
 def test_listar_productos_por_defecto_devuelve_10_ordenados_por_id(

@@ -5,9 +5,12 @@ import os
 # toquen una base real aunque el desarrollador tenga DATABASE_URL exportada.
 os.environ["DATABASE_URL"] = "sqlite://"
 
+from contextlib import contextmanager  # noqa: E402
+
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy import event  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
@@ -42,6 +45,36 @@ def test_db():
     yield
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def db_session(test_db):
+    """Sesión directa a la base de pruebas, para preparar datos."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def count_queries():
+    """Devuelve un context manager que registra las sentencias SQL."""
+
+    @contextmanager
+    def _count_queries():
+        statements = []
+
+        def record(conn, cursor, statement, parameters, context, many):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            yield statements
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+
+    return _count_queries
 
 
 @pytest.fixture

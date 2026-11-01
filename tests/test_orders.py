@@ -3,10 +3,12 @@ from datetime import datetime
 
 import pytest
 from sqlalchemy import event
+from sqlalchemy import update
 from sqlalchemy.dialects import mysql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+import models
 from database import get_db
 from main import app
 
@@ -182,8 +184,13 @@ def test_pedido_con_producto_inexistente_devuelve_404_con_sus_ids(
 
 @pytest.mark.parametrize(
     "items",
-    [[], [{"product_id": 1, "quantity": 0}]],
-    ids=["items_vacio", "quantity_0"],
+    [
+        [],
+        [{"product_id": 1, "quantity": 0}],
+        [{"product_id": 1, "quantity": 2**31}],
+        [{"product_id": n, "quantity": 1} for n in range(1, 102)],
+    ],
+    ids=["items_vacio", "quantity_0", "quantity_mayor_a_int", "101_lineas"],
 )
 def test_pedido_con_items_invalidos_devuelve_422(client, user, items):
     response = client.post(
@@ -226,24 +233,80 @@ def test_historial_muestra_pedidos_del_mas_reciente_al_mas_antiguo(
     assert orders == [segundo, primero]
 
 
+def test_historial_desempata_por_id_si_dos_pedidos_tienen_la_misma_fecha(
+    client, user, create_product, db_session
+):
+    # MySQL (DATETIME) guarda solo segundos: dos pedidos del mismo segundo
+    # empatan en created_at y el orden lo decide el id.
+    mouse = create_product(name="Mouse", stock=10)
+    ids = []
+    for _ in range(2):
+        response = client.post(
+            "/orders/",
+            json={
+                "user_id": user["id"],
+                "items": [{"product_id": mouse["id"], "quantity": 1}],
+            },
+        )
+        ids.append(response.json()["id"])
+    db_session.execute(
+        update(models.Order).values(created_at=datetime(2026, 1, 1, 12, 0))
+    )
+    db_session.commit()
+
+    orders = client.get(f"/users/{user['id']}/orders").json()
+
+    assert [order["id"] for order in orders] == [ids[1], ids[0]]
+
+
+def test_historial_no_hace_una_consulta_por_pedido(
+    client, user, create_product, count_queries
+):
+    mouse = create_product(name="Mouse", stock=10)
+    teclado = create_product(name="Teclado", stock=10)
+
+    def create_order(product_id):
+        response = client.post(
+            "/orders/",
+            json={
+                "user_id": user["id"],
+                "items": [{"product_id": product_id, "quantity": 1}],
+            },
+        )
+        assert response.status_code == 201
+
+    create_order(mouse["id"])
+    with count_queries() as with_one_order:
+        client.get(f"/users/{user['id']}/orders")
+    create_order(teclado["id"])
+    create_order(mouse["id"])
+    with count_queries() as with_three_orders:
+        client.get(f"/users/{user['id']}/orders")
+
+    # Sin N+1, el número de consultas no crece con la cantidad de pedidos.
+    assert len(with_three_orders) == len(with_one_order)
+
+
 def test_historial_no_incluye_pedidos_de_otros_usuarios(
     client, create_user, create_product
 ):
     ana = create_user(name="Ana", email="ana@example.com")
     luis = create_user(name="Luis", email="luis@example.com")
     mouse = create_product(name="Mouse", stock=10)
-    client.post(
+    response = client.post(
         "/orders/",
         json={
             "user_id": luis["id"],
             "items": [{"product_id": mouse["id"], "quantity": 1}],
         },
     )
+    assert response.status_code == 201
 
     response = client.get(f"/users/{ana['id']}/orders")
 
     assert response.status_code == 200
     assert response.json() == []
+    assert len(client.get(f"/users/{luis['id']}/orders").json()) == 1
 
 
 @pytest.mark.parametrize(
@@ -287,8 +350,31 @@ def test_pedido_cuyo_total_excede_la_columna_total_price_responde_422(
     assert productos[0]["stock"] == 50
 
 
+def test_pedido_con_total_exactamente_en_el_maximo_es_valido(
+    client, user, create_product
+):
+    # 999.999 x 100 (sin descuento: no es mayor a 100) + 99,99
+    # = 99.999.999,99, el máximo que cabe en DECIMAL(10, 2).
+    caja = create_product(name="Caja", price=100, stock=999_999)
+    cinta = create_product(name="Cinta", price=99.99, stock=1)
+
+    response = client.post(
+        "/orders/",
+        json={
+            "user_id": user["id"],
+            "items": [
+                {"product_id": caja["id"], "quantity": 999_999},
+                {"product_id": cinta["id"], "quantity": 1},
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["total_price"] == 99_999_999.99
+
+
 class SessionWithoutDatabase:
-    """Sesión falsa: la primera consulta falla como si la BD se hubiera caído."""
+    """Sesión falsa: la primera consulta falla (la BD está caída)."""
 
     def get(self, *args, **kwargs):
         raise OperationalError(
@@ -336,7 +422,10 @@ def test_consulta_de_productos_del_pedido_bloquea_filas_en_mysql(
         event.remove(Session, "do_orm_execute", capture_statement)
 
     assert response.status_code == 201
-    mysql_sql = [str(stmt.compile(dialect=mysql.dialect())) for stmt in statements]
+    mysql_sql = [
+        str(statement.compile(dialect=mysql.dialect()))
+        for statement in statements
+    ]
     locking_queries = [sql for sql in mysql_sql if "FOR UPDATE" in sql]
     assert len(locking_queries) == 1
     assert "FROM products" in locking_queries[0]
