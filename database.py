@@ -17,8 +17,14 @@ if not DATABASE_URL:
     )
 
 # pool_pre_ping descarta conexiones caídas y pool_recycle las renueva antes
-# de que MySQL las cierre por inactividad (wait_timeout).
-engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=3600)
+# de que MySQL las cierre por inactividad (wait_timeout). hide_parameters
+# evita que los datos de los usuarios queden en los logs de error.
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    hide_parameters=True,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False)
 
 

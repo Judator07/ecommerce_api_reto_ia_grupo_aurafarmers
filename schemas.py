@@ -21,6 +21,10 @@ MAX_INT = 2_147_483_647
 class UserCreate(BaseModel):
     """Datos para registrar un usuario."""
 
+    # Quita espacios al inicio y al final: un nombre de solo espacios queda
+    # vacío y min_length lo rechaza.
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     name: str = Field(
         min_length=1,
         max_length=50,
@@ -29,13 +33,28 @@ class UserCreate(BaseModel):
     )
     email: EmailStr = Field(
         max_length=100,
-        description="Correo electrónico del usuario. Debe ser único.",
+        description=(
+            "Correo electrónico del usuario. Debe ser único y se guarda en "
+            "minúsculas."
+        ),
         examples=["ana.perez@example.com"],
     )
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        """Pasa el email a minúsculas.
+
+        Así la unicidad no depende de mayúsculas: MySQL ya las ignora al
+        comparar, pero SQLite no.
+        """
+        return value.lower()
 
 
 class ProductCreate(BaseModel):
     """Datos para registrar un producto en el catálogo."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     name: str = Field(
         min_length=1,

@@ -13,6 +13,8 @@ from fastapi import Path
 from fastapi import Query
 from fastapi import Request
 from fastapi import status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import Select
 from sqlalchemy import select
@@ -73,6 +75,26 @@ async def database_error_handler(
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Error interno de base de datos"},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Responde 422 sin repetir en la respuesta los valores recibidos.
+
+    El manejador por defecto incluye el valor inválido ("input"); si el JSON
+    trae NaN o Infinity, ese valor no se puede serializar y la API respondía
+    500 en lugar de 422.
+    """
+    errors = [
+        {key: value for key, value in error.items() if key != "input"}
+        for error in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": jsonable_encoder(errors)},
     )
 
 
@@ -176,7 +198,11 @@ def get_products(
     ] = 10,
     offset: Annotated[
         int,
-        Query(ge=0, description="Cantidad de productos a omitir."),
+        Query(
+            ge=0,
+            le=schemas.MAX_INT,
+            description="Cantidad de productos a omitir.",
+        ),
     ] = 0,
 ) -> list[models.Product]:
     """Lista los productos del catálogo de forma paginada.
@@ -308,9 +334,11 @@ def process_order(order: schemas.OrderCreate, db: DbSession) -> models.Order:
         items=items,
     )
     db.add(new_order)
+    db.flush()  # asigna el id sin recargar el pedido después del commit
+    order_id = new_order.id
     db.commit()
 
-    stmt = select_orders_with_items().where(models.Order.id == new_order.id)
+    stmt = select_orders_with_items().where(models.Order.id == order_id)
     return db.scalars(stmt).one()
 
 
@@ -327,7 +355,11 @@ def process_order(order: schemas.OrderCreate, db: DbSession) -> models.Order:
 def get_user_orders(
     user_id: Annotated[
         int,
-        Path(le=schemas.MAX_INT, description="Identificador del usuario."),
+        Path(
+            gt=0,
+            le=schemas.MAX_INT,
+            description="Identificador del usuario.",
+        ),
     ],
     db: DbSession,
 ) -> list[models.Order]:
@@ -341,6 +373,7 @@ def get_user_orders(
 
     Errores:
     - **404**: el usuario no existe.
+    - **422**: `user_id` no es un entero entre 1 y 2147483647.
     """
     if db.get(models.User, user_id) is None:
         raise HTTPException(
