@@ -7,6 +7,8 @@ herramienta de IA **Claude Code**, como parte del reto práctico del curso 22969
 (Universidad Industrial de Santander).
 
 - Auditoría, correcciones y registro de sugerencias de la IA: [`AUDITORIA.md`](AUDITORIA.md)
+- Informe de evaluación de la herramienta de IA: [`docs/Informe_Evaluacion_IA_ClaudeCode.pdf`](docs/Informe_Evaluacion_IA_ClaudeCode.pdf)
+  (versión editable: [`.docx`](docs/Informe_Evaluacion_IA_ClaudeCode.docx))
 - Documentación interactiva (con la API en ejecución): <http://localhost:8000/docs> (Swagger) y <http://localhost:8000/redoc>
 
 ## Contenido
@@ -36,6 +38,7 @@ responsabilidad clara por módulo:
 ├── models.py            # Modelos ORM de SQLAlchemy (tablas y relaciones)
 ├── database.py          # Conexión (DATABASE_URL), engine, sesión y dependencia get_db
 ├── tests/               # Pruebas unitarias y de integración (pytest)
+├── docs/                # Informe de evaluación de la herramienta de IA (PDF y DOCX)
 ├── Dockerfile           # Imagen de la API
 ├── docker-compose.yml   # API + MySQL con volumen persistente
 ├── .env.example         # Plantilla de variables de entorno (copiar a .env)
