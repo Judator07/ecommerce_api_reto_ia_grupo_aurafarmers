@@ -52,8 +52,8 @@ responsabilidad clara por módulo:
 
 **Flujo de una petición** (ejemplo `POST /orders/`):
 
-1. FastAPI valida el cuerpo con `schemas.OrderCreate` (si algo no es válido responde **422**).
-2. `get_db` abre una sesión de base de datos para la petición.
+1. `get_db` crea la sesión de base de datos de la petición (la conexión se abre con la primera consulta).
+2. FastAPI valida el cuerpo con `schemas.OrderCreate` (si algo no es válido responde **422**).
 3. El endpoint verifica el usuario, carga todos los productos en **una sola consulta**
    `SELECT … FOR UPDATE` (bloquea las filas para evitar sobreventa), valida el stock,
    aplica el descuento, descuenta el stock y guarda el pedido con sus líneas en **un único commit**.
@@ -115,10 +115,13 @@ erDiagram
 | `POST` | `/products/` | Registra un producto. | 201, 422 |
 | `GET` | `/products/?limit=10&offset=0` | Lista productos paginados y ordenados por id (`limit` 1–100, por defecto 10; `offset` ≥ 0). | 200, 422 |
 | `POST` | `/orders/` | Crea un pedido, aplica descuentos y descuenta stock. | 201, 404 (usuario o producto), 409 (stock), 422 (datos inválidos o total mayor a 99.999.999,99) |
-| `GET` | `/users/{user_id}/orders` | Historial de pedidos del usuario con los nombres de los productos, del más reciente al más antiguo. | 200 (lista, vacía si no tiene pedidos), 404 |
+| `GET` | `/users/{user_id}/orders` | Historial de pedidos del usuario con los nombres de los productos, del más reciente al más antiguo. | 200 (lista, vacía si no tiene pedidos), 404, 422 (`user_id` fuera de 1–2147483647) |
 
 Cada endpoint tiene docstring, `summary`, `tags`, ejemplos y modelo de respuesta, visibles en `/docs`.
-Ante un error inesperado de base de datos, la API responde **500** con un mensaje genérico (el detalle queda en el log).
+Formato de los errores: los de validación (422) devuelven `{"detail": [ ... ]}` con la lista de campos inválidos,
+sin repetir los valores recibidos; los demás (404, 409 y el 422 por total excedido) devuelven `{"detail": "mensaje"}`.
+Ante un error inesperado de base de datos, la API responde **500** con un mensaje genérico (el detalle queda en el log,
+sin los datos de la consulta).
 
 ## Ejecución con Docker (recomendada)
 
@@ -128,7 +131,8 @@ Requisitos: Docker con Docker Compose v2.
 cp .env.example .env
 ```
 
-Edita `.env` y cambia las contraseñas (solo letras, números, `_` y `-`; caracteres como `@ : /` rompen la URL de conexión).
+Edita `.env` y cambia las contraseñas. Usa solo letras, números, `_` y `-`: `@` y `%` rompen la URL de conexión
+y Docker Compose interpreta `$` como una variable.
 El archivo `.env` está en `.gitignore`: nunca se sube al repositorio.
 
 ```bash
@@ -146,7 +150,8 @@ docker compose ps
 docker compose logs -f api
 ```
 
-**Persistencia:** los datos de MySQL viven en el volumen `mysql_data`. Para comprobarlo, crea datos,
+**Persistencia:** los datos de MySQL viven en el volumen nombrado `mysql_data` (Docker Compose lo crea como
+`<nombre-del-proyecto>_mysql_data`, por ejemplo `ecommerce_api_reto_ia_grupo_aurafarmers_mysql_data`). Para comprobarlo, crea datos,
 detén los contenedores **sin** `-v` y vuelve a levantarlos; los datos siguen ahí:
 
 ```bash
@@ -214,15 +219,39 @@ pytest
 
 `pytest.ini` ya incluye la medición de cobertura (`pytest-cov`) sobre `main`, `database`, `models` y `schemas`,
 muestra las líneas no cubiertas y **falla si la cobertura baja del 70 %** (mínimo exigido por el reto).
-Resultado actual: **42 pruebas aprobadas y 97 % de cobertura**. Para ejecutar un solo archivo sin el umbral de
+Resultado actual: **54 pruebas aprobadas y 97 % de cobertura**. Para ejecutar un solo archivo sin el umbral de
 cobertura: `pytest tests/test_orders.py --no-cov`.
+
+**Prueba manual de concurrencia (con Docker y MySQL real).** SQLite ignora `SELECT … FOR UPDATE`, así que el bloqueo
+se comprobó a mano con el stack de Docker en ejecución. Primero, un usuario y un producto con stock 3:
+
+```bash
+curl -X POST localhost:8000/users/ -H "Content-Type: application/json" \
+  -d '{"name": "Ana Pérez", "email": "ana@example.com"}'
+```
+
+```bash
+curl -X POST localhost:8000/products/ -H "Content-Type: application/json" \
+  -d '{"name": "Consola edición limitada", "price": 500, "stock": 3}'
+```
+
+Luego, 20 pedidos simultáneos de una unidad (usa el `id` del producto creado; aquí, 1):
+
+```bash
+seq 1 20 | xargs -P 20 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 1, "items": [{"product_id": 1, "quantity": 1}]}' \
+  localhost:8000/orders/ | sort | uniq -c
+```
+
+Resultado obtenido con MySQL 8.4: `3 201` y `17 409`, y el stock final del producto es 0 (nunca negativo).
 
 | Archivo | Tipo | Qué cubre |
 |---|---|---|
 | `tests/test_discount.py` | Unitarias | Regla del 10 %, límite exacto de 100 y redondeo. |
 | `tests/test_users.py` | Integración | Registro, email duplicado y validaciones; historial de usuario inexistente o sin pedidos. |
 | `tests/test_products.py` | Integración | Registro, validaciones y paginación (`limit`/`offset`). |
-| `tests/test_orders.py` | Integración | Pedido con descuento y stock, ids repetidos, stock insuficiente sin efectos parciales, 404/422, orden del historial, error de BD (500) y bloqueo `FOR UPDATE` en el dialecto MySQL. |
+| `tests/test_orders.py` | Integración | Pedido con descuento y stock, ids repetidos, stock insuficiente sin efectos parciales, 404/422, límites del total, orden del historial (y desempate por id), ausencia de N+1, error de BD (500) y bloqueo `FOR UPDATE` en el dialecto MySQL. |
 
 ## Ejemplos de uso
 
