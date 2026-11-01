@@ -1,0 +1,47 @@
+# Control de versiones
+.git
+.gitignore
+
+# Secretos (solo se usan para interpolar docker-compose, nunca van a la imagen)
+.env
+.env.*
+
+# Entornos virtuales
+.venv
+venv
+env
+
+# Caché y artefactos de Python
+__pycache__
+*.pyc
+*.pyo
+.mypy_cache
+.ruff_cache
+
+# Pruebas y cobertura
+tests
+.pytest_cache
+.coverage
+.coverage.*
+htmlcov
+
+# Bases de datos locales
+*.db
+*.sqlite3
+
+# Documentación e informe
+docs
+*.md
+*.pdf
+*.docx
+
+# Editores y sistema
+.idea
+.vscode
+*.log
+.DS_Store
+
+# Archivos de Docker
+Dockerfile
+.dockerignore
+docker-compose.yml

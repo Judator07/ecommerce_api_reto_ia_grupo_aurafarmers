@@ -1,0 +1,34 @@
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?falta MYSQL_ROOT_PASSWORD; crea el archivo .env con cp .env.example .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ecommerce_db}
+      MYSQL_USER: ${MYSQL_USER:-ecommerce}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?falta MYSQL_PASSWORD; crea el archivo .env con cp .env.example .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      # Por TCP (127.0.0.1): el servidor temporal de inicialización solo escucha
+      # por socket, así que no se marca "healthy" hasta que MySQL está listo de verdad.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Sin "ports": MySQL solo es accesible desde la red interna de compose.
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-ecommerce}:${MYSQL_PASSWORD:?falta MYSQL_PASSWORD; crea el archivo .env con cp .env.example .env}@db:3306/${MYSQL_DATABASE:-ecommerce_db}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+
+volumes:
+  mysql_data:
