@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 DISCOUNT_THRESHOLD = Decimal("100")
 DISCOUNT_FACTOR = Decimal("0.90")
 CENTS = Decimal("0.01")
+# Máximo que cabe en orders.total_price (Numeric(10, 2)).
+MAX_ORDER_TOTAL = Decimal("99999999.99")
 
 DbSession = Annotated[Session, Depends(database.get_db)]
 
@@ -228,7 +230,8 @@ def process_order(order: schemas.OrderCreate, db: DbSession) -> models.Order:
       sus identificadores).
     - **409**: no hay stock suficiente (se indica el producto, lo disponible
       y lo solicitado).
-    - **422**: los datos enviados no son válidos.
+    - **422**: los datos enviados no son válidos o el total del pedido supera
+      99.999.999,99 (máximo que admite la base de datos).
     """
     if db.get(models.User, order.user_id) is None:
         raise HTTPException(
@@ -268,6 +271,26 @@ def process_order(order: schemas.OrderCreate, db: DbSession) -> models.Order:
                 ),
             )
 
+    unit_prices = {
+        product_id: apply_discount(product.price)
+        for product_id, product in products.items()
+    }
+    total = sum(
+        (
+            unit_prices[product_id] * quantity
+            for product_id, quantity in quantities.items()
+        ),
+        Decimal("0.00"),
+    )
+    if total > MAX_ORDER_TOTAL:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                f"El total del pedido ({total}) supera el máximo permitido "
+                f"({MAX_ORDER_TOTAL})"
+            ),
+        )
+
     items = []
     for product_id, quantity in quantities.items():
         product = products[product_id]
@@ -276,13 +299,9 @@ def process_order(order: schemas.OrderCreate, db: DbSession) -> models.Order:
             models.OrderItem(
                 product=product,
                 quantity=quantity,
-                unit_price=apply_discount(product.price),
+                unit_price=unit_prices[product_id],
             )
         )
-    total = sum(
-        (item.unit_price * item.quantity for item in items),
-        Decimal("0.00"),
-    )
     new_order = models.Order(
         user_id=order.user_id,
         total_price=total,
@@ -306,7 +325,10 @@ def process_order(order: schemas.OrderCreate, db: DbSession) -> models.Order:
     },
 )
 def get_user_orders(
-    user_id: Annotated[int, Path(description="Identificador del usuario.")],
+    user_id: Annotated[
+        int,
+        Path(le=schemas.MAX_INT, description="Identificador del usuario."),
+    ],
     db: DbSession,
 ) -> list[models.Order]:
     """Devuelve los pedidos de un usuario con sus productos.

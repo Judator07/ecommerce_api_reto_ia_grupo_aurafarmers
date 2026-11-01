@@ -14,7 +14,7 @@ from pydantic import field_validator
 # JSON y los clientes esperan números.
 
 # Valor máximo de una columna INT en MySQL: evita un error 500 de la base de
-# datos cuando se envían cantidades fuera de rango (se responde 422).
+# datos cuando se envían ids o cantidades fuera de rango (se responde 422).
 MAX_INT = 2_147_483_647
 
 
@@ -63,6 +63,7 @@ class OrderItemCreate(BaseModel):
 
     product_id: int = Field(
         gt=0,
+        le=MAX_INT,
         description="Identificador del producto.",
         examples=[1],
     )
@@ -80,6 +81,7 @@ class OrderCreate(BaseModel):
 
     user_id: int = Field(
         gt=0,
+        le=MAX_INT,
         description="Identificador del usuario que realiza el pedido.",
         examples=[1],
     )
