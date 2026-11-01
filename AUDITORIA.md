@@ -1,8 +1,8 @@
 # Auditoría, correcciones y registro de sugerencias de la IA
 
-Herramienta utilizada: **Claude Code**. La auditoría inicial la hizo un sub-agente de la herramienta que recibió
+Herramienta utilizada: **Claude Code**. La auditoría inicial la hizo un subagente de la herramienta que recibió
 el código **sin** los comentarios de pista que traía el repositorio original, para medir qué detecta por sí solo.
-La columna *IA autónoma* indica si ese sub-agente detectó el problema (Sí / Parcial / No).
+La columna *IA autónoma* indica si ese subagente detectó el problema (Sí / Parcial / No).
 
 ## 1. Problemas identificados y corregidos
 
@@ -30,10 +30,10 @@ La columna *IA autónoma* indica si ese sub-agente detectó el problema (Sí / P
 | P20 | `schemas.py` / `main.py` | Estándar | `ProductCreate` existía sin endpoint: no se podían crear productos por la API. | `POST /products/`. | Sí |
 | P21 | `main.py` (`get_products`) | Rendimiento | Devuelve toda la tabla sin paginar. | `limit` (1–100, 10 por defecto) y `offset`, ordenado por id. | Sí |
 | P22 | Proyecto | Estándar | Sin pruebas, sin docstrings/OpenAPI, sin Docker y README vacío. | Tareas 4, 5 y 6 del reto. | No (solo recibió el código) |
-| P23 | `schemas.py` / `main.py` | Seguridad (validación) | *Hallado por las pruebas tras la refactorización:* los ids (`user_id`, `product_id`) no tenían límite superior; con SQLite un id mayor a 2^63-1 provocaba un 500 en texto plano. La revisión final encontró lo mismo en `offset` y en el `user_id` de la ruta (también con valores negativos). | Tope `le=2147483647` (INT de MySQL) en el cuerpo, en `offset` y en la ruta (que además exige `user_id` > 0) → 422. | Sí (sub-agentes de pruebas y de revisión) |
-| P24 | `main.py` (`process_order`) | Regla de negocio | *Hallado por las pruebas tras la refactorización:* un total mayor a 99.999.999,99 no cabe en `DECIMAL(10,2)`; reproducido a mano en MySQL 8.4: error 500 "Out of range value for column 'total_price'". | Se valida el total antes de modificar el stock → 422 con mensaje claro. | Sí (sub-agente de pruebas) |
-| P25 | `main.py` | Seguridad (validación) | *Hallado en la revisión final:* un JSON con `NaN` o `Infinity` devolvía 500: Pydantic lo rechaza, pero la respuesta 422 por defecto repite el valor recibido y no se puede serializar. | Manejador de `RequestValidationError` que responde 422 sin repetir los valores recibidos. | Sí (sub-agente de revisión) |
-| P26 | `database.py` | Seguridad | *Hallado en la revisión final:* los logs de errores de BD incluían los parámetros de la consulta (por ejemplo, nombre y email de un usuario). | `create_engine(..., hide_parameters=True)`. | Sí (sub-agente de revisión) |
+| P23 | `schemas.py` / `main.py` | Seguridad (validación) | *Hallado por las pruebas tras la refactorización:* los ids (`user_id`, `product_id`) no tenían límite superior; con SQLite un id mayor a 2^63-1 provocaba un 500 en texto plano. La revisión final encontró lo mismo en `offset` y en el `user_id` de la ruta (también con valores negativos). | Tope `le=2147483647` (INT de MySQL) en el cuerpo, en `offset` y en la ruta (que además exige `user_id` > 0) → 422. | Sí (subagentes de pruebas y de revisión) |
+| P24 | `main.py` (`process_order`) | Regla de negocio | *Hallado por las pruebas tras la refactorización:* un total mayor a 99.999.999,99 no cabe en `DECIMAL(10,2)`; reproducido a mano en MySQL 8.4: error 500 "Out of range value for column 'total_price'". | Se valida el total antes de modificar el stock → 422 con mensaje claro. | Sí (subagente de pruebas) |
+| P25 | `main.py` | Seguridad (validación) | *Hallado en la revisión final:* un JSON con `NaN` o `Infinity` devolvía 500: Pydantic lo rechaza, pero la respuesta 422 por defecto repite el valor recibido y no se puede serializar. | Manejador de `RequestValidationError` que responde 422 sin repetir los valores recibidos. | Sí (subagente de revisión) |
+| P26 | `database.py` | Seguridad | *Hallado en la revisión final:* los logs de errores de BD incluían los parámetros de la consulta (por ejemplo, nombre y email de un usuario). | `create_engine(..., hide_parameters=True)`. | Sí (subagente de revisión) |
 
 ## 2. Registro de sugerencias de la IA
 
@@ -63,12 +63,15 @@ La columna *IA autónoma* indica si ese sub-agente detectó el problema (Sí / P
 | *Collation* específica de MySQL para el email (`utf8mb4_0900_as_ci`). | Se optó por guardar el email en minúsculas: es más simple y da el mismo resultado en SQLite y MySQL. MySQL seguirá ignorando las tildes al comparar emails. |
 | Schemas de error en OpenAPI para las respuestas 404 y 409. | Se documentó el formato de los errores en el README. |
 
-### Corregidas manualmente (la sugerencia inicial era incorrecta u obsoleta)
-- El comentario del código original sugería `datetime.utcnow`, que está **deprecado desde Python 3.12**: se usó `datetime.now(timezone.utc)`.
-- Las instrucciones iniciales de pruebas usaban `httpx`, que Starlette 1.10 ya depreca para `TestClient`: se cambió a `httpx2`.
+### Corregidas (la sugerencia inicial de la IA era incorrecta u obsoleta)
+
+Ninguna requirió intervención del equipo: las detectó y corrigió la propia herramienta (el orquestador o sus subagentes revisores) al ejecutar y verificar.
+
+- El comentario del código original sugería `datetime.utcnow`, que está **obsoleto (deprecated) desde Python 3.12**: se usó `datetime.now(timezone.utc)`.
+- Las instrucciones iniciales de pruebas usaban `httpx`, que Starlette 1.10 ya marca como obsoleto para `TestClient`: se cambió a `httpx2`.
 - La IA indicó filtrar en `pytest.ini` un aviso de SQLAlchemy sobre `Decimal` en SQLite que ya no existe en SQLAlchemy 2.0.55: se eliminó el filtro.
 - Un borrador de este documento decía que el código original cobraba 370 en el ejemplo de la sección 3; el valor real es 430.0. Se recalculó antes de publicarlo.
-- Un borrador de P16 decía que en el original un email duplicado o un fallo de BD «devolvían un 500 con traza». Era falso: el duplicado devolvía 200 y guardaba una fila repetida, y los fallos de BD daban un 500 en texto plano. Lo detectó el sub-agente revisor, que ejecutó el código original.
+- Un borrador de P16 decía que en el original un email duplicado o un fallo de BD «devolvían un 500 con traza». Era falso: el duplicado devolvía 200 y guardaba una fila repetida, y los fallos de BD daban un 500 en texto plano. Lo detectó el subagente revisor, que ejecutó el código original.
 
 ## 3. Cambios de contrato respecto al código original
 
